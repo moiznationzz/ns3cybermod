@@ -2,17 +2,17 @@
 #define NS3_CYBERMOD_H
 
 /* ============================================================
- *  NS-3 CYBER ATTACK MODULE (CSMA SAFE)
+ *  NS-3 CSMA CYBER ATTACK MODULE
  * ------------------------------------------------------------
- *  Supported Attacks:
+ *  Supported attacks:
  *   - UDP Flood
  *   - TCP Flood
  *   - ICMP Flood (UDP-based volumetric)
  *
- *  This module is designed to be:
- *   - Stable
- *   - Error-free
- *   - Compatible with CSMA networks
+ *  Features:
+ *   - Real-time TX/RX logging
+ *   - Packet counting per victim
+ *   - CSMA compatible
  * ============================================================
  */
 
@@ -26,67 +26,49 @@
 
 namespace ns3 {
 
-/* ============================================================
- *  GLOBAL STATISTICS
- * ============================================================
- */
+/* ================= GLOBAL STATS ================= */
 
-/**
- * Stores the number of packets received by each victim.
- * Updated via Rx callback during simulation.
- */
+// Packet counter for each victim
 extern uint64_t totalPacketsReceived[100];
 
-/* ============================================================
- *  SIMULATION PARAMETERS STRUCT
- * ============================================================
- */
+/* ================= SIMULATION PARAMETERS ================= */
+
 struct SimParams
 {
-    uint32_t numAttackers;     // Number of attacker nodes
-    uint32_t numVictims;       // Number of victim nodes
-    uint16_t attackPort;       // Target port
-    std::string attackRate;    // Attack rate (e.g. 10Mbps)
-    std::string attackType;    // udp-flood | tcp-flood | icmp-flood
+    uint32_t numAttackers;
+    uint32_t numVictims;
+    uint16_t attackPort;
+    std::string attackRate;
+    std::string attackType;
 
-    // Network objects
     std::vector<Ipv4InterfaceContainer> iface;
     NodeContainer attackers;
     NodeContainer victims;
 };
 
-/* ============================================================
- *  CALLBACK FUNCTION
- * ============================================================
- */
+/* ================= CALLBACKS ================= */
 
-/**
- * Called whenever a victim receives a packet.
- */
-void PacketReceivedCallback(uint32_t victimIndex,
+// Count packets at victim
+void PacketReceivedCallback(uint32_t victimId,
                             Ptr<const Packet> packet,
-                            const Address &addr);
+                            const Address &from);
 
-/* ============================================================
- *  ATTACK FUNCTIONS
- * ============================================================
- */
+// Real-time logging
+void TxLog(uint32_t attackerId, Ptr<const Packet> packet);
+void RxLog(uint32_t victimId, Ptr<const Packet> packet,
+           const Address &from);
 
-void SetupUdpFlood(const SimParams& params);
-void SetupTcpFlood(const SimParams& params);
-void SetupIcmpFlood(const SimParams& params);
+/* ================= ATTACK FUNCTIONS ================= */
 
-/* ============================================================
- *  ATTACK SELECTOR
- * ============================================================
- */
+void SetupOnOffFlood(const SimParams& params,
+                     const std::string& socketFactory);
+
 void SetupAttack(const SimParams& params);
 
-/* ============================================================
- *  LOGGING
- * ============================================================
- */
+/* ================= LOGGING ================= */
+
 void SaveLogs(const SimParams& params);
 
 } // namespace ns3
-#endif
+
+#endif // NS3_CYBERMOD_H
