@@ -1,146 +1,142 @@
-#include "../ns3cybermod.h"
+#include "ns3/ns3cybermod.h"
 #include "ns3/on-off-helper.h"
 #include "ns3/packet-sink.h"
 #include <fstream>
 
 namespace ns3 {
 
-/* ================= GLOBAL STATS ================= */
-
+/* ============================================================
+ *  GLOBAL STATS DEFINITION
+ * ============================================================
+ */
 uint64_t totalPacketsReceived[100] = {0};
 
-/* ================= RX CALLBACK ================= */
-
+/* ============================================================
+ *  RX CALLBACK
+ * ============================================================
+ */
 void PacketReceivedCallback(uint32_t victimIndex,
                             Ptr<const Packet> packet,
                             const Address &addr)
 {
+    // Count packets received by each victim
     if (victimIndex < 100)
         totalPacketsReceived[victimIndex]++;
 }
 
-/* ================= COMMON FLOOD BASE ================= */
-
-void SetupOnOffFlood(const SimParams& params,
-                     const std::string& socketFactory,
-                     uint32_t pktSize,
-                     std::string rate,
-                     double onTime,
-                     double offTime)
+/* ============================================================
+ *  INSTALL PACKET SINKS (ONCE)
+ * ============================================================
+ * PacketSink listens on victim nodes and avoids socket conflicts
+ */
+static void InstallPacketSinks(const SimParams& params,
+                               const std::string& socketType)
 {
-    uint32_t A = params.numAttackers;
-    uint32_t V = params.numVictims;
+    uint32_t offset = params.numAttackers;
 
-    // ---- Victims ----
-    for (uint32_t v = 0; v < V; v++)
+    for (uint32_t v = 0; v < params.numVictims; v++)
     {
-        PacketSinkHelper sink(socketFactory,
-            InetSocketAddress(params.iface[0].GetAddress(A + v),
+        PacketSinkHelper sink(
+            socketType,
+            InetSocketAddress(params.iface[0].GetAddress(offset + v),
                               params.attackPort));
 
-        auto app = sink.Install(params.victims.Get(v));
-        app.Start(Seconds(0.0));
-        app.Stop(Seconds(15.0));
+        auto apps = sink.Install(params.victims.Get(v));
+        apps.Start(Seconds(0.0));
+        apps.Stop(Seconds(20.0));
 
-        auto sinkPtr = DynamicCast<PacketSink>(app.Get(0));
-        sinkPtr->TraceConnectWithoutContext(
+        Ptr<PacketSink> ps = DynamicCast<PacketSink>(apps.Get(0));
+        ps->TraceConnectWithoutContext(
             "Rx", MakeBoundCallback(&PacketReceivedCallback, v));
     }
+}
 
-    // ---- Attackers ----
-    for (uint32_t a = 0; a < A; a++)
+/* ============================================================
+ *  UDP FLOOD ATTACK
+ * ============================================================
+ */
+void SetupUdpFlood(const SimParams& params)
+{
+    InstallPacketSinks(params, "ns3::UdpSocketFactory");
+
+    for (uint32_t a = 0; a < params.numAttackers; a++)
     {
-        for (uint32_t v = 0; v < V; v++)
-        {
-            OnOffHelper onoff(socketFactory,
-                InetSocketAddress(
-                    params.iface[0].GetAddress(A + v),
-                    params.attackPort));
+        OnOffHelper onoff(
+            "ns3::UdpSocketFactory",
+            InetSocketAddress(
+                params.iface[0].GetAddress(params.numAttackers),
+                params.attackPort));
 
-            onoff.SetAttribute("PacketSize", UintegerValue(pktSize));
-            onoff.SetAttribute("DataRate", DataRateValue(DataRate(rate)));
-            onoff.SetAttribute("OnTime",
-                StringValue("ns3::ConstantRandomVariable[Constant=" + std::to_string(onTime) + "]"));
-            onoff.SetAttribute("OffTime",
-                StringValue("ns3::ConstantRandomVariable[Constant=" + std::to_string(offTime) + "]"));
+        onoff.SetConstantRate(DataRate(params.attackRate));
+        onoff.SetAttribute("PacketSize", UintegerValue(1024));
 
-            auto app = onoff.Install(params.attackers.Get(a));
-            app.Start(Seconds(1.0));
-            app.Stop(Seconds(14.0));
-        }
+        auto app = onoff.Install(params.attackers.Get(a));
+        app.Start(Seconds(1.0));
+        app.Stop(Seconds(10.0));
     }
 }
 
-/* ================= ATTACK IMPLEMENTATIONS ================= */
+/* ============================================================
+ *  TCP FLOOD ATTACK
+ * ============================================================
+ */
+void SetupTcpFlood(const SimParams& params)
+{
+    InstallPacketSinks(params, "ns3::TcpSocketFactory");
 
+    for (uint32_t a = 0; a < params.numAttackers; a++)
+    {
+        OnOffHelper onoff(
+            "ns3::TcpSocketFactory",
+            InetSocketAddress(
+                params.iface[0].GetAddress(params.numAttackers),
+                params.attackPort));
+
+        onoff.SetConstantRate(DataRate(params.attackRate));
+        onoff.SetAttribute("PacketSize", UintegerValue(512));
+
+        auto app = onoff.Install(params.attackers.Get(a));
+        app.Start(Seconds(1.0));
+        app.Stop(Seconds(10.0));
+    }
+}
+
+/* ============================================================
+ *  ICMP FLOOD (UDP-BASED SIMULATION)
+ * ============================================================
+ */
 void SetupIcmpFlood(const SimParams& params)
 {
-    SetupOnOffFlood(params, "ns3::UdpSocketFactory",
-                    1024, params.attackRate, 1.0, 0.0);
+    // ICMP flood simulated as high-rate UDP traffic
+    SetupUdpFlood(params);
 }
 
-void SetupTcpSynFlood(const SimParams& params)
-{
-    SetupOnOffFlood(params, "ns3::TcpSocketFactory",
-                    64, "5Mbps", 0.2, 0.1);
-}
-
-void SetupQueueSaturation(const SimParams& params)
-{
-    SetupOnOffFlood(params, "ns3::UdpSocketFactory",
-                    64, "50Mbps", 1.0, 0.0);
-}
-
-void SetupLowRateDos(const SimParams& params)
-{
-    SetupOnOffFlood(params, "ns3::UdpSocketFactory",
-                    1024, "20Mbps", 0.05, 0.95);
-}
-
-void SetupBandwidthStarvation(const SimParams& params)
-{
-    SetupOnOffFlood(params, "ns3::UdpSocketFactory",
-                    1500, "80Mbps", 1.0, 0.0);
-}
-
-/* ================= ATTACK SELECTOR ================= */
-
+/* ============================================================
+ *  ATTACK SELECTOR
+ * ============================================================
+ */
 void SetupAttack(const SimParams& params)
 {
     if (params.attackType == "udp-flood")
-        SetupOnOffFlood(params, "ns3::UdpSocketFactory",
-                        1024, params.attackRate, 1.0, 0.0);
-
-    else if (params.attackType == "tcp-syn-flood")
-        SetupTcpSynFlood(params);
-
+        SetupUdpFlood(params);
+    else if (params.attackType == "tcp-flood")
+        SetupTcpFlood(params);
     else if (params.attackType == "icmp-flood")
         SetupIcmpFlood(params);
-
-    else if (params.attackType == "queue-saturation")
-        SetupQueueSaturation(params);
-
-    else if (params.attackType == "low-rate-dos")
-        SetupLowRateDos(params);
-
-    else if (params.attackType == "bandwidth-starvation")
-        SetupBandwidthStarvation(params);
-
     else
         NS_ABORT_MSG("Unsupported CSMA attack type");
 }
 
-/* ================= LOGGING ================= */
-
+/* ============================================================
+ *  LOGGING FUNCTION
+ * ============================================================
+ */
 void SaveLogs(const SimParams& params)
 {
     std::ofstream file("ddos_log.txt");
 
-    file << "===== NS-3 CSMA Cyber Attack Log =====\n";
-    file << "Attack Type : " << params.attackType << "\n";
-    file << "Attackers   : " << params.numAttackers << "\n";
-    file << "Victims     : " << params.numVictims << "\n";
-    file << "Rate        : " << params.attackRate << "\n\n";
+    file << "===== CSMA CYBER ATTACK LOG =====\n";
+    file << "Attack Type: " << params.attackType << "\n\n";
 
     for (uint32_t i = 0; i < params.numVictims; i++)
         file << "Victim " << i
