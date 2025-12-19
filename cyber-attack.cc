@@ -1,65 +1,102 @@
-#include "ns3/ns3cybermod.h"
-#include "ns3/csma-module.h"
-#include "ns3/internet-module.h"
+#ifndef NS3_CYBERMOD_H
+#define NS3_CYBERMOD_H
+
+/* ============================================================
+ *  NS-3 CSMA CYBER ATTACK MODULE
+ * ------------------------------------------------------------
+ *  Description:
+ *   Custom ns-3 module for simulating cyber attacks in a
+ *   CSMA-based network environment.
+ *
+ *  Supported Attacks:
+ *   - UDP Flood
+ *   - TCP Flood
+ *   - ICMP-like Flood (via UDP)
+ *   - IP Spoofing Attack
+ *   - Replay Attack
+ *
+ *  Features:
+ *   - Packet TX/RX tracing
+ *   - Per-victim packet counting
+ *   - Raw socket based spoofing
+ *   - Packet capture and replay
+ *
+ *  Educational & research use only.
+ * ============================================================
+ */
+
 #include "ns3/core-module.h"
+#include "ns3/network-module.h"
+#include "ns3/internet-module.h"
+#include "ns3/applications-module.h"
 
-using namespace ns3;
+#include <vector>
+#include <string>
 
-NS_LOG_COMPONENT_DEFINE("CyberAttackCSMA");
+namespace ns3 {
 
-int main(int argc, char *argv[])
+/* ================= GLOBAL STATISTICS ================= */
+
+/*
+ * Packet counters per victim node
+ */
+extern uint64_t totalPacketsReceived[100];
+
+/*
+ * Packet storage for replay attacks
+ */
+extern std::vector<Ptr<Packet>> capturedPackets;
+
+/* ================= SIMULATION PARAMETERS ================= */
+
+struct SimParams
 {
-    SimParams params;
+    uint32_t numAttackers;    // Number of attacker nodes
+    uint32_t numVictims;      // Number of victim nodes
+    uint16_t attackPort;      // Target port
+    std::string attackRate;   // Flood rate (e.g. "20Mbps")
+    std::string attackType;   // udp-flood, tcp-flood, icmp-flood,
+                              // ip-spoofing, replay
 
-    /* ================= USER SETTINGS ================= */
+    std::vector<Ipv4InterfaceContainer> iface;
 
-    params.numAttackers = 3;
-    params.numVictims   = 2;
-    params.attackPort   = 8080;
-    params.attackRate   = "10Mbps";
-    params.attackType   = "udp-flood"; // change here
+    NodeContainer attackers;
+    NodeContainer victims;
+};
 
-    double simTime = 12.0;
-    std::string csmaRate = "100Mbps";
+/* ================= CALLBACK DECLARATIONS ================= */
 
-    NS_LOG_UNCOND("=== CSMA CYBER ATTACK SIMULATION STARTED ===");
+void PacketReceivedCallback(uint32_t victimId,
+                            Ptr<const Packet> packet,
+                            const Address &from);
 
-    /* ================= NODE CREATION ================= */
+void TxLog(uint32_t attackerId,
+           Ptr<const Packet> packet);
 
-    params.attackers.Create(params.numAttackers);
-    params.victims.Create(params.numVictims);
+void RxLog(uint32_t victimId,
+           Ptr<const Packet> packet,
+           const Address &from);
 
-    NodeContainer all;
-    all.Add(params.attackers);
-    all.Add(params.victims);
+/* ================= ATTACK SETUP FUNCTIONS ================= */
 
-    /* ================= NETWORK ================= */
+/* Flood attacks (UDP / TCP / ICMP-like) */
+void SetupOnOffFlood(const SimParams& params,
+                     const std::string& socketFactory);
 
-    InternetStackHelper internet;
-    internet.Install(all);
+/* IP Spoofing attack */
+void SetupIpSpoofingAttack(const SimParams& params);
 
-    CsmaHelper csma;
-    csma.SetChannelAttribute("DataRate", StringValue(csmaRate));
-    csma.SetChannelAttribute("Delay", StringValue("6560ns"));
+/* Replay attack */
+void SetupReplayAttack(const SimParams& params);
 
-    NetDeviceContainer devices = csma.Install(all);
+/* Attack selector */
+void SetupAttack(const SimParams& params);
 
-    Ipv4AddressHelper ip;
-    ip.SetBase("10.1.1.0", "255.255.255.0");
-    params.iface.push_back(ip.Assign(devices));
+/* ================= LOGGING FUNCTIONS ================= */
 
-    /* ================= ATTACK ================= */
+void SaveLogs(const SimParams& params);
 
-    SetupAttack(params);
+} // namespace ns3
 
-    /* ================= RUN ================= */
-
-    Simulator::Stop(Seconds(simTime));
-    Simulator::Run();
-    Simulator::Destroy();
-
-    SaveLogs(params);
-
-    NS_LOG_UNCOND("=== SIMULATION FINISHED ===");
-    return 0;
-}
+#endif // NS3_CYBERMOD_H
+a
