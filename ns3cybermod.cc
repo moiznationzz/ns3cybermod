@@ -220,7 +220,7 @@ void SetupAttack(const SimParams& params)
         NS_ABORT_MSG("Unsupported attack type");
 }
 
-/* ================= BEAUTIFUL LOGS ================= */
+/* ================= LOGS ================= */
 void SaveLogs(const SimParams& params)
 {
     NS_LOG_UNCOND("\n================ ATTACK SUMMARY ================\n");
