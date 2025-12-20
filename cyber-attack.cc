@@ -1,102 +1,154 @@
-#ifndef NS3_CYBERMOD_H
-#define NS3_CYBERMOD_H
+#include "ns3/ns3cybermod.h"      // <-- OUR CUSTOM MODULE (.h + .cc)
+#include "ns3/csma-module.h"     // CSMA channel and devices
+#include "ns3/internet-module.h" // TCP/IP stack
+#include "ns3/core-module.h"     // Core ns-3 functionality
 
-/* ============================================================
- *  NS-3 CSMA CYBER ATTACK MODULE
- * ------------------------------------------------------------
- *  Description:
- *   Custom ns-3 module for simulating cyber attacks in a
- *   CSMA-based network environment.
- *
- *  Supported Attacks:
- *   - UDP Flood
- *   - TCP Flood
- *   - ICMP-like Flood (via UDP)
- *   - IP Spoofing Attack
- *   - Replay Attack
- *
- *  Features:
- *   - Packet TX/RX tracing
- *   - Per-victim packet counting
- *   - Raw socket based spoofing
- *   - Packet capture and replay
- *
- *  Educational & research use only.
- * ============================================================
- */
-
-#include "ns3/core-module.h"
-#include "ns3/network-module.h"
-#include "ns3/internet-module.h"
-#include "ns3/applications-module.h"
-
-#include <vector>
-#include <string>
-
-namespace ns3 {
-
-/* ================= GLOBAL STATISTICS ================= */
+using namespace ns3;
 
 /*
- * Packet counters per victim node
+ * Logging component for this scenario file.
+ * Used by NS_LOG_UNCOND statements in this program.
  */
-extern uint64_t totalPacketsReceived[100];
+NS_LOG_COMPONENT_DEFINE("CyberAttackCSMA");
 
-/*
- * Packet storage for replay attacks
- */
-extern std::vector<Ptr<Packet>> capturedPackets;
-
-/* ================= SIMULATION PARAMETERS ================= */
-
-struct SimParams
+int main(int argc, char *argv[])
 {
-    uint32_t numAttackers;    // Number of attacker nodes
-    uint32_t numVictims;      // Number of victim nodes
-    uint16_t attackPort;      // Target port
-    std::string attackRate;   // Flood rate (e.g. "20Mbps")
-    std::string attackType;   // udp-flood, tcp-flood, icmp-flood,
-                              // ip-spoofing, replay
+    /* =====================================================
+     * SimParams STRUCT (DEFINED IN ns3cybermod.h)
+     * -----------------------------------------------------
+     * This structure is shared between:
+     *   - cyber-attack-csma.cc (this file)
+     *   - ns3cybermod.cc       (attack implementation)
+     *
+     * It carries all configuration parameters
+     * required by the attack setup functions.
+     * =====================================================
+     */
+    SimParams params;
 
-    std::vector<Ipv4InterfaceContainer> iface;
+    /* ================= ATTACK CONFIGURATION ================= */
 
-    NodeContainer attackers;
-    NodeContainer victims;
-};
+    /*
+     * These parameters are READ by:
+     *   SetupAttack(params)
+     *
+     * SetupAttack() is IMPLEMENTED in ns3cybermod.cc
+     * and DECLARED in ns3cybermod.h
+     *
+     * Supported attack types (handled in ns3cybermod.cc):
+     *   - "udp-flood"
+     *   - "tcp-flood"
+     *   - "icmp-flood"
+     *   - "ip-spoofing"
+     *   - "replay"
+     */
+    params.numAttackers = 3;          // Used in SetupOnOffFlood()
+    params.numVictims   = 2;          // Used in PacketSink setup
+    params.attackPort   = 8080;       // Victim listening port
+    params.attackRate   = "10Mbps";   // Flood rate (OnOffApplication)
+    params.attackType   = "udp-flood";// Selected attack (SetupAttack)
 
-/* ================= CALLBACK DECLARATIONS ================= */
+    double simTime       = 12.0;
+    std::string csmaRate = "100Mbps";
 
-void PacketReceivedCallback(uint32_t victimId,
-                            Ptr<const Packet> packet,
-                            const Address &from);
+    NS_LOG_UNCOND("=== CSMA CYBER ATTACK SIMULATION STARTED ===");
 
-void TxLog(uint32_t attackerId,
-           Ptr<const Packet> packet);
+    /* ================= NODE CREATION ================= */
 
-void RxLog(uint32_t victimId,
-           Ptr<const Packet> packet,
-           const Address &from);
+    /*
+     * NodeContainers declared inside SimParams (ns3cybermod.h)
+     * These are later accessed by attack functions
+     * in ns3cybermod.cc
+     */
+    params.attackers.Create(params.numAttackers);
+    params.victims.Create(params.numVictims);
 
-/* ================= ATTACK SETUP FUNCTIONS ================= */
+    NodeContainer allNodes;
+    allNodes.Add(params.attackers);
+    allNodes.Add(params.victims);
 
-/* Flood attacks (UDP / TCP / ICMP-like) */
-void SetupOnOffFlood(const SimParams& params,
-                     const std::string& socketFactory);
+    /* ================= INTERNET STACK ================= */
 
-/* IP Spoofing attack */
-void SetupIpSpoofingAttack(const SimParams& params);
+    /*
+     * Required for TCP, UDP, ICMP, and raw sockets.
+     * Attack traffic generated in ns3cybermod.cc
+     * depends on this stack.
+     */
+    InternetStackHelper internet;
+    internet.Install(allNodes);
 
-/* Replay attack */
-void SetupReplayAttack(const SimParams& params);
+    /* ================= CSMA NETWORK ================= */
 
-/* Attack selector */
-void SetupAttack(const SimParams& params);
+    /*
+     * CSMA channel used by attackers and victims.
+     * All packets generated in ns3cybermod.cc
+     * flow through this CSMA channel.
+     */
+    CsmaHelper csma;
+    csma.SetChannelAttribute("DataRate", StringValue(csmaRate));
+    csma.SetChannelAttribute("Delay", StringValue("6560ns"));
 
-/* ================= LOGGING FUNCTIONS ================= */
+    NetDeviceContainer devices = csma.Install(allNodes);
 
-void SaveLogs(const SimParams& params);
+    /* ================= IP ADDRESS ASSIGNMENT ================= */
 
-} // namespace ns3
+    /*
+     * IP interfaces are STORED in:
+     *   params.iface (vector)
+     *
+     * This vector is later USED in ns3cybermod.cc to:
+     *   - Get victim IP addresses
+     *   - Configure attack destinations
+     */
+    Ipv4AddressHelper ip;
+    ip.SetBase("10.1.1.0", "255.255.255.0");
+    params.iface.push_back(ip.Assign(devices));
 
-#endif // NS3_CYBERMOD_H
-a
+    /* ================= ATTACK SETUP ================= */
+
+    /*
+     * SetupAttack(params)
+     * -------------------------------------------------
+     * DECLARED in: ns3cybermod.h
+     * IMPLEMENTED in: ns3cybermod.cc
+     *
+     * Internally, it:
+     *   - Selects attack type
+     *   - Calls SetupOnOffFlood(), SetupIpSpoofingAttack(),
+     *     or SetupReplayAttack()
+     *   - Installs PacketSink on victims
+     *   - Installs attack applications on attackers
+     *   - Attaches TX/RX callbacks:
+     *       • TxLog()
+     *       • RxLog()
+     *       • PacketReceivedCallback()
+     */
+    SetupAttack(params);
+
+    /* ================= SIMULATION EXECUTION ================= */
+
+    Simulator::Stop(Seconds(simTime));
+    Simulator::Run();
+    Simulator::Destroy();
+
+    /* ================= SAVE RESULTS ================= */
+
+    /*
+     * SaveLogs(params)
+     * -------------------------------------------------
+     * DECLARED in: ns3cybermod.h
+     * IMPLEMENTED in: ns3cybermod.cc
+     *
+     * Writes:
+     *   - Attack type
+     *   - Number of attackers & victims
+     *   - Total packets received per victim
+     *
+     * Uses global array:
+     *   totalPacketsReceived[]
+     */
+    SaveLogs(params);
+
+    NS_LOG_UNCOND("=== SIMULATION FINISHED ===");
+    return 0;
+}
